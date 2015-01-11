@@ -19,7 +19,6 @@
 	<div class="form-row">
         <label for="node-input-devicetype"><i class="fa fa-list-ul"></i> Type</label>
 		<select type="text" id="node-input-devicetype" style="width: 150px;">
-			<option value="RoomTemperatureSensor">RoomTemperatureSensor</option>
 			<option value="DimmerActuator">DimmerActuator</option>
 			<option value="GenericActuator">GenericActuator</option>
 			<option value="RoomTemperatureActuator">RoomTemperatureActuator</option>
@@ -52,6 +51,7 @@
 			<option value="RoomTemperatureActuator">RoomTemperatureActuator</option>
 			<option value="DimmerActuator">DimmerActuator</option>
 			<option value="SwitchActuator">SwitchActuator</option>
+			<option value="GenericActuator">GenericActuator</option>
 		</select>
 	</div>
     <div class="form-row">
@@ -70,11 +70,42 @@
 
 
 <script type="text/x-red" data-help-name="R-SH Push">
-    <p>Documentation</p>
+    <p>Emits the current state of the configured device as soon as it changes.</p>
 </script>
 
 <script type="text/x-red" data-help-name="R-SH Set">
-    <p>Documentation</p>
+    <p>Accepts a Javascriptobject as incoming message that will be set on the configured device.<br/><br/>
+	RoomTemperatureActuator:<br/>
+	<pre>
+msg.payload={
+	PtTmp:19
+};
+	</pre>
+	SwitchActuator:<br/>
+	<pre>
+msg.payload={
+	IsOn:"true"
+};
+	</pre>
+	DimmerActuator:<br/>
+	<pre>
+msg.payload={
+	DmLvl:50
+};
+	</pre>
+	GenericActuator:<br/>
+	<pre>
+msg.payload={
+	Ppts: { 
+		Ppt: {
+			xsi$type: "BooleanProperty", 
+			Name: "Value", 
+			Value: "False" 
+		} 
+	}
+}
+	</pre>
+	</p>
 </script>
 
 <script type="text/javascript">
