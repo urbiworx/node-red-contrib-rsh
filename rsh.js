@@ -147,7 +147,7 @@ module.exports = function(RED) {
 			xml.BaseRequest.BasedOnConfigVersion=configVersion;
 			xml.BaseRequest.ActuatorStates={
 				LogicalDeviceState:{
-					xsi$type:that.devicetype+"State",
+					xsi$type:(that.devicetype==="GenericActuator")?"GenericDeviceState":that.devicetype+"State",
 					LID:that.deviceid
 				}
 			};
@@ -157,7 +157,6 @@ module.exports = function(RED) {
 				}
 			}
 			sendRequest("cmd",xml,function(resp){
-				console.log("RESPONSE");
 				that.send({payload:resp});
 			})
 		});
