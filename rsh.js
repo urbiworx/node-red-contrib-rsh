@@ -24,12 +24,15 @@ module.exports = function(RED) {
 	var XMLTool=new (require('./xml').XML)();
 	console.log(XMLTool);
 	/* Smarthome variables */
-	var sessionId=null;
+	var sessionId=null; //active sessionid
+	var configLoadTimer=null;
 	var configVersion;
 	var devices=null;
 	var locations={};
 	var states={};
+	var lastLogin=null;
 	var smarthomeip=null;
+	var updateRunning=false; // is true if currently updated states are pulled from smarhome
 	
 	
 	/* Smarthome functions */
@@ -156,9 +159,17 @@ module.exports = function(RED) {
 					xml.BaseRequest.ActuatorStates.LogicalDeviceState[property]=msg.payload[property];
 				}
 			}
-			sendRequest("cmd",xml,function(resp){
-				that.send({payload:resp});
-			})
+			function send(){
+				sendRequest("cmd",xml,function(resp){
+					if ((typeof(resp.BaseResponse.Error)!=="undefined")&&(resp.BaseResponse.Error=="IllegalSessionId")){
+						console.log("Illegal Session Id, relogin");
+						setTimeout(send,4000);//Resend, will relogin automatically
+					} else {
+						that.send({payload:resp});
+					}
+				})
+			}
+			send();
 		});
     }
 	RED.nodes.registerType("R-SH Set",ShNodeSet);
@@ -169,14 +180,14 @@ module.exports = function(RED) {
 		if (reqparsed.query.debug==="true"){
 			res.end(JSON.stringify(devices));
 		} else if (reqparsed.query.logout==="true"){
-			var xml=createRequest("LogoutRequest"); 
-			xml.BaseRequest.SessionId=sessionId;
-			sendRequest("cmd",xml,function(resp){
+			logout( function(){
 				res.end("Logout confirmed. Terminate node-red process now, otherwise will relogin within seconds.");
-				sessionId=null;
-				devices=null;
 			});
-
+			return;
+		} else if (reqparsed.query.relogin==="true"){
+			login_1();
+			res.end("Relogin will start now.");
+			return;
 		} else if (reqparsed.query.list){
 			var ret = new Array();
 			if (smarthomeip==null){
@@ -200,12 +211,7 @@ module.exports = function(RED) {
 			var config={ip:reqparsed.query.ip,username:reqparsed.query.username,password:password};
 			fs.writeFile("./rwesmarthome.config",JSON.stringify(config),function(err){
 				if (sessionId!=null){
-					var xml=createRequest("LogoutRequest"); 
-					xml.BaseRequest.SessionId=sessionId;
-					sendRequest("cmd",xml,function(resp){
-						sessionId=null;
-						devices=null;
-					});
+					logout();
 				} else {
 					login_1();
 				}
@@ -247,14 +253,33 @@ module.exports = function(RED) {
 			xml.BaseRequest.UserName=data.username;
 			xml.BaseRequest.Password=data.password;
 			smarthomeip=data.ip;
-			//console.log(XMLTool.renderXML(xml));
-			sendRequest("cmd",xml,function(resp){
-				sessionId=resp.BaseResponse.SessionId;
-				configVersion=resp.BaseResponse.CurrentConfigurationVersion;
-				console.log("s-id:"+sessionId);
-				//console.log(JSON.stringify(respXML));
-				getEntities_2();
-			});
+
+			if (sessionId!=null){ //this is a relogin
+				var logoutAndLogin=function (){
+					if (updateRunning){ //if an update is just running do not interrupt it
+						setTimeout(logoutAndLogin,100);
+					} else {
+						if (configLoadTimer!=null){ //this is a relogin
+							clearTimeout(configLoadTimer); //prevent config updates, we will emit updates later when we get all device status
+						}
+						processUpdate_5(function(){ //get a current state of all devices to reduce the timeframe where we do not get updates
+							logout(requestSender); //logout old session
+						});
+					}
+				}
+				logoutAndLogin();
+			} else {
+				requestSender();
+			}
+			function requestSender(){
+				sendRequest("cmd",xml,function(resp){
+					lastLogin=new Date();
+					sessionId=resp.BaseResponse.SessionId;
+					configVersion=resp.BaseResponse.CurrentConfigurationVersion;
+					console.log("s-id:"+sessionId);
+					getEntities_2();
+				});
+			}
 		
 			}
 		);
@@ -267,7 +292,9 @@ module.exports = function(RED) {
 		devices={};
 		sendRequest("cmd",xml,function(resp){
 			console.log("GetEntitiesRequest");
-			//console.log(JSON.stringify(resp));
+			if (typeof(resp.BaseResponse.LDs)==="undefined"){
+				console.log(JSON.stringify(resp));
+			}
 			var tempDevices=resp.BaseResponse.LDs.LD;
 			var tempLocations=resp.BaseResponse.LCs.LC;
 			for (var i=0;i<tempLocations.length;i++)
@@ -288,7 +315,6 @@ module.exports = function(RED) {
 					}
 			}
 			getDeviceStates_3();
-			//console.log(JSON.stringify(resp));
 		});
 	}
 	function getDeviceStates_3(){
@@ -297,14 +323,19 @@ module.exports = function(RED) {
 		xml.BaseRequest.BasedOnConfigVersion=configVersion;
 		sendRequest("cmd",xml,function(resp){
 			console.log("GetAllLogicalDeviceStatesRequest");
+			var tempOldStates=states;
+			states={}
 			var tempStates=resp.BaseResponse.States.LogicalDeviceState;
 			for (var i=0;i<tempStates.length;i++)
 			{
 				states[tempStates[i].LID]=tempStates[i];
-				updateNodesWithState(tempStates[i]);
+				//Check if state is different from before login (only applies if this is a relogin, if it is the first there will be no state)
+				if ((typeof(tempOldStates[tempStates[i].LID])==="undefined")||JSON.stringify(tempOldStates[tempStates[i].LID])!==JSON.stringify(tempStates[i])){
+					console.log("STATE CHANGE"+(typeof(devices[tempStates[i].LID])!=="undefined"?devices[tempStates[i].LID].name:""));
+					updateNodesWithState(tempStates[i]);
+				}
 			}
 			subscribe_4();
-			//console.log(JSON.stringify(resp));
 		});
 	}
 
@@ -319,12 +350,36 @@ module.exports = function(RED) {
 			processUpdate_5();
 		});
 	}
-	function processUpdate_5(){
+	function processUpdate_5(callback){
+		/*
+		if (typeof(callback)==="undefined"&&new Date().getTime()-lastLogin.getTime()>1000*60*60*4){
+			console.log("RELOGIN Triggered");
+			login_1();
+			return;
+		} */
+		updateRunning=true;
 		sendRequest("upd","upd",function(resp){
-			//console.log("UPD"); 
-			//console.log(JSON.stringify(resp));
+			updateRunning=false;
 			if (typeof(resp.NotificationList)==="undefined"){
-				login_1();
+				if (typeof(callback)!="undefined"){
+					callback();
+				} else {
+					sessionId=null;//Otherwise would try to logout first, but something is broken here
+					login_1();
+				}
+				return;
+			}
+			if (typeof(resp.NotificationList.Notifications.LogoutNotification)!=="undefined"){
+				console.log("NOTIFICATION LOGOUT");
+				var xml=createRequest("NotificationRequest"); 
+				xml.BaseRequest.SessionId=sessionId;
+				xml.BaseRequest.BasedOnConfigVersion=configVersion;
+				xml.BaseRequest.NotificationType = {$text:"DeviceStateChanges"};
+				xml.BaseRequest.Action = {$text:"Subscribe"};
+				sendRequest("cmd",xml,function(resp){
+					console.log("NotificationRequest");
+					configLoadTimer=setTimeout(processUpdate_5,500);
+				});
 				return;
 			}
 			var tempNotifications=resp.NotificationList.Notifications.LogicalDeviceStatesChangedNotification;
@@ -340,19 +395,33 @@ module.exports = function(RED) {
 				}
 				
 				for (var i=0;i<tempStates.length;i++){
+					console.log(new Date());
 					console.log("device:"+JSON.stringify(devices[tempStates[i].LID]));
 					console.log("state:"+JSON.stringify(tempStates[i]));	
 					states[tempStates[i].LID]=tempStates[i];
 					updateNodesWithState(tempStates[i]);
 				}
 			}
-			if (sessionId!=null){
-				setTimeout(processUpdate_5,500);
+			if (typeof(callback)!="undefined"){
+				callback();
+			} else if (sessionId!=null){
+				configLoadTimer=setTimeout(processUpdate_5,500);
 			}
 		});
 
 	}
-	
+	function logout(callback){
+		var xml=createRequest("LogoutRequest"); 
+		xml.BaseRequest.SessionId=sessionId;
+		var logoutSessionId=sessionId;
+		sendRequest("cmd",xml,function(resp){
+			if (sessionId==logoutSessionId){ //Only invalidate session if the logged out session is the current one and there werent a relogin
+				sessionId=null;
+				devices=null;
+			};
+			if (typeof(callback)!=="undefined") {callback()};
+		});
+	}
 	function updateNodesWithState(state){
 		for(var j=0;j<nodes.length;j++){
 			if(nodes[j].deviceid===state.LID){
