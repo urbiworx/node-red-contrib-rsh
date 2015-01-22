@@ -145,31 +145,38 @@ module.exports = function(RED) {
 		this.devicetype=n.devicetype;
 		registerAndEnableNode(this);
 		this.on("input",function(msg) {
-			var xml=createRequest("SetActuatorStatesRequest"); 
-			xml.BaseRequest.SessionId=sessionId;
-			xml.BaseRequest.BasedOnConfigVersion=configVersion;
-			xml.BaseRequest.ActuatorStates={
-				LogicalDeviceState:{
-					xsi$type:(that.devicetype==="GenericActuator")?"GenericDeviceState":that.devicetype+"State",
-					LID:that.deviceid
+			var requestSender=function(){
+				if (sessionId==null){ //Prevent sending before init
+					setTimeout(requestSender,4000);
+					return;
 				}
-			};
-			for (var property in msg.payload) {
-				if (msg.payload.hasOwnProperty(property)){
-					xml.BaseRequest.ActuatorStates.LogicalDeviceState[property]=msg.payload[property];
-				}
-			}
-			function send(){
-				sendRequest("cmd",xml,function(resp){
-					if ((typeof(resp.BaseResponse.Error)!=="undefined")&&(resp.BaseResponse.Error=="IllegalSessionId")){
-						console.log("Illegal Session Id, relogin");
-						setTimeout(send,4000);//Resend, will relogin automatically
-					} else {
-						that.send({payload:resp});
+				var xml=createRequest("SetActuatorStatesRequest"); 
+				xml.BaseRequest.SessionId=sessionId;
+				xml.BaseRequest.BasedOnConfigVersion=configVersion;
+				xml.BaseRequest.ActuatorStates={
+					LogicalDeviceState:{
+						xsi$type:(that.devicetype==="GenericActuator")?"GenericDeviceState":that.devicetype+"State",
+						LID:that.deviceid
 					}
-				})
-			}
-			send();
+				};
+				for (var property in msg.payload) {
+					if (msg.payload.hasOwnProperty(property)){
+						xml.BaseRequest.ActuatorStates.LogicalDeviceState[property]=msg.payload[property];
+					}
+				}
+				function send(){
+					sendRequest("cmd",xml,function(resp){
+						if ((typeof(resp.BaseResponse.Error)!=="undefined")&&(resp.BaseResponse.Error=="IllegalSessionId")){
+							console.log("Illegal Session Id, relogin");
+							setTimeout(send,4000);//Resend, will relogin automatically
+						} else {
+							that.send({payload:resp});
+						}
+					})
+				}
+				send();
+			};
+			requestSender();
 		});
     }
 	RED.nodes.registerType("R-SH Set",ShNodeSet);
