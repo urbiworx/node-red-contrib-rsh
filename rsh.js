@@ -22,7 +22,6 @@ var https = require('https');
 module.exports = function(RED) {
     "use strict";
 	var XMLTool=new (require('./xml').XML)();
-	console.log(XMLTool);
 	/* Smarthome variables */
 	var sessionId=null; //active sessionid
 	var configLoadTimer=null;
@@ -247,7 +246,15 @@ module.exports = function(RED) {
 	function corsHandler(req,res,next) { next(); }
 	
 	RED.httpNode.get("/rwesmarthome",corsHandler,callback,errorHandler);
-	login_1();
+	function login(){
+		try{
+			login_1();
+		} catch (e) {
+			console.log(JSON.stringify(e));
+			login();
+		}
+	};
+	login();
 	
 	function login_1(){
 		fs.readFile('./rwesmarthome.config', function (err, data) {
@@ -283,7 +290,6 @@ module.exports = function(RED) {
 					lastLogin=new Date();
 					sessionId=resp.BaseResponse.SessionId;
 					configVersion=resp.BaseResponse.CurrentConfigurationVersion;
-					console.log("s-id:"+sessionId);
 					getEntities_2();
 				});
 			}
@@ -338,7 +344,6 @@ module.exports = function(RED) {
 				states[tempStates[i].LID]=tempStates[i];
 				//Check if state is different from before login (only applies if this is a relogin, if it is the first there will be no state)
 				if ((typeof(tempOldStates[tempStates[i].LID])==="undefined")||JSON.stringify(tempOldStates[tempStates[i].LID])!==JSON.stringify(tempStates[i])){
-					console.log("STATE CHANGE"+(typeof(devices[tempStates[i].LID])!=="undefined"?devices[tempStates[i].LID].name:""));
 					updateNodesWithState(tempStates[i]);
 				}
 			}
@@ -401,10 +406,7 @@ module.exports = function(RED) {
 					tempStates[tempStates.length]=tempNotifications[i].LogicalDeviceStates.LogicalDeviceState;
 				}
 				
-				for (var i=0;i<tempStates.length;i++){
-					console.log(new Date());
-					console.log("device:"+JSON.stringify(devices[tempStates[i].LID]));
-					console.log("state:"+JSON.stringify(tempStates[i]));	
+				for (var i=0;i<tempStates.length;i++){	
 					states[tempStates[i].LID]=tempStates[i];
 					updateNodesWithState(tempStates[i]);
 				}
