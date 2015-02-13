@@ -31,6 +31,7 @@ module.exports = function(RED) {
 	var states={};
 	var lastLogin=null;
 	var smarthomeip=null;
+	var loginactive=false;
 	var updateRunning=false; // is true if currently updated states are pulled from smarhome
 	
 	
@@ -143,6 +144,7 @@ module.exports = function(RED) {
 		this.deviceid=n.deviceid;
 		this.devicetype=n.devicetype;
 		registerAndEnableNode(this);
+		var d = require('domain').create();
 		this.on("input",function(msg) {
 			var requestSender=function(){
 				if (sessionId==null){ //Prevent sending before init
@@ -175,7 +177,10 @@ module.exports = function(RED) {
 				}
 				send();
 			};
-			requestSender();
+			d.run(requestSender);
+			d.on("error",function(e){
+				that.error("Error during Device Set "+e.stack);
+			});
 		});
     }
 	RED.nodes.registerType("R-SH Set",ShNodeSet);
@@ -247,12 +252,16 @@ module.exports = function(RED) {
 	
 	RED.httpNode.get("/rwesmarthome",corsHandler,callback,errorHandler);
 	function login(){
-		try{
-			login_1();
-		} catch (e) {
-			console.log(JSON.stringify(e));
-			login();
+		if (loginactive){
+			return;
 		}
+		var d = require('domain').create();
+		d.run(login_1);
+		d.on("error",function(e){
+			console.log("Error during logon "+JSON.stringify(e));
+			loginactive=false;
+			login();
+		});
 	};
 	login();
 	
@@ -358,6 +367,7 @@ module.exports = function(RED) {
 		xml.BaseRequest.NotificationType = {$text:"DeviceStateChanges"};
 		xml.BaseRequest.Action = {$text:"Subscribe"};
 		sendRequest("cmd",xml,function(resp){
+			loginactive=false;
 			console.log("NotificationRequest");
 			processUpdate_5();
 		});

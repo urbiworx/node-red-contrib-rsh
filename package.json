@@ -1,6 +1,6 @@
 {
     "name"         : "node-red-contrib-rsh",
-    "version"      : "0.0.5",
+    "version"      : "0.0.6",
     "description"  : "RWE Smarthome Nodes for Node Red",
     "dependencies": {
     },
