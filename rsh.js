@@ -185,72 +185,58 @@ module.exports = function(RED) {
     }
 	RED.nodes.registerType("R-SH Set",ShNodeSet);
 	
-    function callback(req,res) {
-		var reqparsed=urllib.parse(req.url, true);
-		
-		if (reqparsed.query.debug==="true"){
-			res.end(JSON.stringify(devices));
-		} else if (reqparsed.query.logout==="true"){
-			logout( function(){
-				res.end("Logout confirmed. Terminate node-red process now, otherwise will relogin within seconds.");
-			});
-			return;
-		} else if (reqparsed.query.relogin==="true"){
-			login_1();
-			res.end("Relogin will start now.");
-			return;
-		} else if (reqparsed.query.list){
-			var ret = new Array();
-			if (smarthomeip==null){
-				ret={noconfig:true}
-			} else if (devices==null){
-				ret={notloggedin:true}
-			} else {
-				for (var deviceid in devices) {
-					if (devices.hasOwnProperty(deviceid)){
-						if (devices[deviceid].type===reqparsed.query.list){
-							ret[ret.length]=devices[deviceid];
-						}
+	RED.httpAdmin.get('/rwesmarthome/debug', function(req, res, next){
+		res.end(JSON.stringify(devices));
+	});
+	RED.httpAdmin.get('/rwesmarthome/logout', function(req, res, next){
+		res.end(JSON.stringify(devices));
+		logout( function(){
+			res.end("Logout confirmed. Terminate node-red process now, otherwise will relogin within seconds.");
+		});
+	});
+	RED.httpAdmin.get('/rwesmarthome/list/:type', function(req, res, next){
+		var ret = new Array();
+		if (smarthomeip==null){
+			ret={noconfig:true}
+		} else if (devices==null){
+			ret={notloggedin:true}
+		} else {
+			for (var deviceid in devices) {
+				if (devices.hasOwnProperty(deviceid)){
+					if (devices[deviceid].type===req.params.type){
+						ret[ret.length]=devices[deviceid];
 					}
 				}
 			}
-			res.end(JSON.stringify(ret));
-		} else if(reqparsed.query.ip){
-			var shasum = crypto.createHash('sha256');
-			shasum.update(reqparsed.query.password);
-			var password = shasum.digest('base64');
-			var config={ip:reqparsed.query.ip,username:reqparsed.query.username,password:password};
-			fs.writeFile("./rwesmarthome.config",JSON.stringify(config),function(err){
-				if (sessionId!=null){
-					logout();
-				} else {
-					login_1();
-				}
-			});
-			res.end("<html>Trying to log you in. Please go back to the <a href='/'>admin gui</a>.</html>");
 		}
-		else if (reqparsed.query.config==="true"){	
-			res.end(
-				"<html><form action='/rwesmarthome' method='get'>"+
-				"RWE Smarthome Configuration:<br/>"+
-				"Ip Address:<input type='text' name='ip'/><br/>"+
-				"Username:<input type='text' name='username'/><br/>"+
-				"Password:<input type='password' name='password'/><br/>"+
-				"<input type='submit' value='send'/>"+
-				"</form></html>"
-			);
-
-		}
-		
-		
-	}
-	function errorHandler(err,req,res,next) {
-	        n.warn(err);
-            res.send(500);
-	};
-	function corsHandler(req,res,next) { next(); }
+		res.end(JSON.stringify(ret));
+	});
+	RED.httpAdmin.get('/rwesmarthome/login', function(req, res, next){	
+		var shasum = crypto.createHash('sha256');
+		shasum.update(req.query.password);
+		var password = shasum.digest('base64');
+		var config={ip:req.query.ip,username:req.query.username,password:password};
+		fs.writeFile("./rwesmarthome.config",JSON.stringify(config),function(err){
+			if (sessionId!=null){
+				logout();
+			} else {
+				login_1();
+			}
+		});
+		res.end("<html>Trying to log you in. Please go back to the <a href='..'>admin gui</a>.</html>");
+	});
+	RED.httpAdmin.get('/rwesmarthome/config', function(req, res, next){	
+		res.end(
+			"<html><form action='login' method='get'>"+
+			"RWE Smarthome Configuration:<br/>"+
+			"Ip Address:<input type='text' name='ip'/><br/>"+
+			"Username:<input type='text' name='username'/><br/>"+
+			"Password:<input type='password' name='password'/><br/>"+
+			"<input type='submit' value='send'/>"+
+			"</form></html>"
+		);
+	});
 	
-	RED.httpNode.get("/rwesmarthome",corsHandler,callback,errorHandler);
 	function login(){
 		if (loginactive){
 			return;
