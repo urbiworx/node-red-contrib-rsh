@@ -21,7 +21,7 @@ var https = require('https');
 
 module.exports = function(RED) {
     "use strict";
-	var XMLTool=new (require('./xml').XML)();
+	var XMLTool=require('meep-meep-xml');
 	/* Smarthome variables */
 	var sessionId=null; //active sessionid
 	var configLoadTimer=null;
@@ -32,8 +32,13 @@ module.exports = function(RED) {
 	var lastLogin=null;
 	var smarthomeip=null;
 	var loginactive=false;
-	var updateRunning=false; // is true if currently updated states are pulled from smarhome
+	var updateRunning=false; // is true if currently updated states are pulled from smarthome
+	var relogintimer=-1;
 	
+	var userDir="";
+	if (RED.settings.userDir){
+		userDir=RED.settings.userDir+"/";
+	} 
 	
 	/* Smarthome functions */
 	var guid = (function() {
@@ -64,6 +69,7 @@ module.exports = function(RED) {
 
 	function sendRequest(path,xml,endFunction){
 		var chunks="";
+		
 		if (typeof(xml)=="string"){
 			var tempXml=xml;
 		} else {
@@ -85,7 +91,7 @@ module.exports = function(RED) {
 				chunks+=chunk;
 			  });
 			   resp.on('end', function (d) { 
-				endFunction(XMLTool.parseXML(chunks));
+				endFunction(XMLTool.parseXML(chunks,{autoinline:false, ignorenamespace:false}));
 			  }); 
 			}
 		);
@@ -112,8 +118,15 @@ module.exports = function(RED) {
 				 } else {
 					node.status({fill:"grey",shape:"ring",text:"Off"});
 				 }
+			} else if (typeof(status.IsOpen)!=="undefined"){
+				if (status.IsOpen.$text=="true"){
+					node.status({fill:"yellow",shape:"dot",text:"On"});
+				 } else {
+					node.status({fill:"grey",shape:"ring",text:"Off"});
+				 }
 			}
-			node.send({payload:status});
+			
+			node.sendState(status);
 		}
 		nodes[nodes.length]=node;
 		if (typeof(states[node.deviceid])!=="undefined"){
@@ -135,8 +148,64 @@ module.exports = function(RED) {
 		var that=this;
 		this.deviceid=n.deviceid;
 		registerAndEnableNode(this);
+		this.sendState=function(status){
+			that.send({payload:status});
+		}
     }
     RED.nodes.registerType("R-SH Push",ShNodeOut);
+	
+	function ShNodeDoor(n) {
+        RED.nodes.createNode(this,n);
+		var that=this;
+		this.deviceid=n.deviceid;
+		registerAndEnableNode(this);
+		this.sendState=function(status){
+			that.send({payload:(status.IsOpen.$text=="true")});
+		}
+    }
+    RED.nodes.registerType("R-SH Door",ShNodeDoor);
+	
+	function ShNodeSwitch(n) {
+        RED.nodes.createNode(this,n);
+		var that=this;
+		this.deviceid=n.deviceid;
+		this.devicetype="SwitchActuator";
+		registerAndEnableNode(this);
+		this.sendState=function(status){
+			that.send({payload:(status.IsOn=="True")});
+		}
+		this.on("input",function(msg) {
+			sendNodeRequest(that, {IsOn:(msg.payload+"")}, function(resp){
+				;
+			});
+		});
+    }
+	RED.nodes.registerType("R-SH Switch",ShNodeSwitch);
+    
+	
+	function ShNodeVariable(n) {
+        RED.nodes.createNode(this,n);
+		var that=this;
+		this.deviceid=n.deviceid;
+		this.devicetype="GenericActuator";
+		registerAndEnableNode(this);
+		this.sendState=function(status){
+			that.send({payload:(status.Ppts.Ppt.Value=="True")});
+		}
+		this.on("input",function(msg) {
+			sendNodeRequest(that, {
+				Ppts: { 
+					Ppt: {
+						xsi$type: "BooleanProperty", 
+						Name: "Value", 
+						Value: (msg.payload===true?"True":"False")
+					} 
+				}
+			}, function(resp){;}
+			);
+		});
+    }
+    RED.nodes.registerType("R-SH Variable",ShNodeVariable);
 	
 	function ShNodeSet(n) {
         RED.nodes.createNode(this,n);
@@ -144,9 +213,22 @@ module.exports = function(RED) {
 		this.deviceid=n.deviceid;
 		this.devicetype=n.devicetype;
 		registerAndEnableNode(this);
-		var d = require('domain').create();
+		this.sendState=function(status){
+			that.send({payload:status});
+		}
 		this.on("input",function(msg) {
-			var requestSender=function(){
+			sendNodeRequest(that, msg.payload, function(resp){
+				that.send({payload:resp});
+			});
+		});
+    }
+	
+	RED.nodes.registerType("R-SH Set",ShNodeSet);
+	
+	
+	function sendNodeRequest(that, messagepayload, responseHandler){
+		var d = require('domain').create();
+		var requestSender=function(){
 				if (sessionId==null){ //Prevent sending before init
 					setTimeout(requestSender,4000);
 					return;
@@ -160,9 +242,9 @@ module.exports = function(RED) {
 						LID:that.deviceid
 					}
 				};
-				for (var property in msg.payload) {
-					if (msg.payload.hasOwnProperty(property)){
-						xml.BaseRequest.ActuatorStates.LogicalDeviceState[property]=msg.payload[property];
+				for (var property in messagepayload) {
+					if (messagepayload.hasOwnProperty(property)){
+						xml.BaseRequest.ActuatorStates.LogicalDeviceState[property]=messagepayload[property];
 					}
 				}
 				function send(){
@@ -171,7 +253,7 @@ module.exports = function(RED) {
 							console.log("Illegal Session Id, relogin");
 							setTimeout(send,4000);//Resend, will relogin automatically
 						} else {
-							that.send({payload:resp});
+							responseHandler(resp);
 						}
 					})
 				}
@@ -181,10 +263,7 @@ module.exports = function(RED) {
 			d.on("error",function(e){
 				that.error("Error during Device Set "+e.stack);
 			});
-		});
-    }
-	RED.nodes.registerType("R-SH Set",ShNodeSet);
-	
+	}
 	RED.httpAdmin.get('/rwesmarthome/debug', function(req, res, next){
 		res.end(JSON.stringify(devices));
 	});
@@ -205,6 +284,10 @@ module.exports = function(RED) {
 				if (devices.hasOwnProperty(deviceid)){
 					if (devices[deviceid].type===req.params.type){
 						ret[ret.length]=devices[deviceid];
+					} else if(req.params.type==="Variable"&&devices[deviceid].type==="GenericActuator"){
+						if (typeof(states[deviceid].Ppts.Ppt.xsi$type)!=="undefined"&& states[deviceid].Ppts.Ppt.xsi$type=="BooleanProperty"){
+							ret[ret.length]=devices[deviceid];
+						}
 					}
 				}
 			}
@@ -216,7 +299,7 @@ module.exports = function(RED) {
 		shasum.update(req.query.password);
 		var password = shasum.digest('base64');
 		var config={ip:req.query.ip,username:req.query.username,password:password};
-		fs.writeFile("./rwesmarthome.config",JSON.stringify(config),function(err){
+		fs.writeFile(userDir+"rwesmarthome.config",JSON.stringify(config),function(err){
 			if (sessionId!=null){
 				logout();
 			} else {
@@ -244,7 +327,7 @@ module.exports = function(RED) {
 		var d = require('domain').create();
 		d.run(login_1);
 		d.on("error",function(e){
-			console.log("Error during logon "+JSON.stringify(e));
+			console.log("Error during logon "+JSON.stringify(e.message));
 			loginactive=false;
 			login();
 		});
@@ -252,7 +335,7 @@ module.exports = function(RED) {
 	login();
 	
 	function login_1(){
-		fs.readFile('./rwesmarthome.config', function (err, data) {
+		fs.readFile(userDir+'rwesmarthome.config', function (err, data) {
 			if (err!=null){
 				return;
 			}
@@ -282,6 +365,7 @@ module.exports = function(RED) {
 			}
 			function requestSender(){
 				sendRequest("cmd",xml,function(resp){
+				
 					lastLogin=new Date();
 					sessionId=resp.BaseResponse.SessionId;
 					configVersion=resp.BaseResponse.CurrentConfigurationVersion;
@@ -366,6 +450,9 @@ module.exports = function(RED) {
 			return;
 		} */
 		updateRunning=true;
+		if (relogintimer==-1){
+			relogintimer=setTimeout(function(){logout();},30*60*1000);
+		}
 		sendRequest("upd","upd",function(resp){
 			updateRunning=false;
 			if (typeof(resp.NotificationList)==="undefined"){
@@ -392,6 +479,7 @@ module.exports = function(RED) {
 			}
 			var tempNotifications=resp.NotificationList.Notifications.LogicalDeviceStatesChangedNotification;
 			if (typeof(tempNotifications)!="undefined"){
+
 				if (!Array.isArray(tempNotifications)){
 					tempNotifications=[tempNotifications];
 				}
@@ -406,7 +494,15 @@ module.exports = function(RED) {
 					states[tempStates[i].LID]=tempStates[i];
 					updateNodesWithState(tempStates[i]);
 				}
+				
+				//Make sure that we relogin if for some reason there are no updates at all for a long time
+				if (tempStates.length>0){
+					clearTimeout(relogintimer);
+					relogintimer=setTimeout(function(){logout();},30*60*1000);
+				};
+				
 			}
+			
 			if (typeof(callback)!="undefined"){
 				callback();
 			} else if (sessionId!=null){
