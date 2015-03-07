@@ -1,0 +1,194 @@
+<!--
+  Copyright 2015 Urbiworx
+
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+-->
+
+<script type="text/x-red" data-template-name="R-SH Door">
+    <div class="form-row">
+        <label for="node-input-deviceid"><i class="fa fa-lightbulb-o"></i> Device</label>
+		<input type="text" id="node-input-deviceid" style="width: 250px;">
+        </input>
+    </div>
+    <div class="form-row">
+        <label for="node-input-name"><i class="fa fa-tag"></i> Name</label>
+		<input type="text" id="node-input-name" style="width: 250px;">
+        </input>
+    </div>
+</script>
+
+<script type="text/x-red" data-help-name="R-SH Door">
+    <p>Outputs true or false depending on current state of sensor (door/window open/close)</p>
+</script>
+
+
+<script type="text/x-red" data-template-name="R-SH Switch">
+    <div class="form-row">
+        <label for="node-input-deviceid"><i class="fa fa-lightbulb-o"></i> Device</label>
+		<input type="text" id="node-input-deviceid" style="width: 250px;">
+        </input>
+    </div>
+    <div class="form-row">
+        <label for="node-input-name"><i class="fa fa-tag"></i> Name</label>
+		<input type="text" id="node-input-name" style="width: 250px;">
+        </input>
+    </div>
+</script>
+
+<script type="text/x-red" data-help-name="R-SH Switch">
+	<p>Accepts true or false to turn on and off</p>
+    <p>Outputs true or false depending on current state of sensor (door/window open/close)</p>
+</script>
+
+<script type="text/x-red" data-template-name="R-SH Variable">
+    <div class="form-row">
+        <label for="node-input-deviceid"><i class="fa fa-lightbulb-o"></i> Device</label>
+		<input type="text" id="node-input-deviceid" style="width: 250px;">
+        </input>
+    </div>
+    <div class="form-row">
+        <label for="node-input-name"><i class="fa fa-tag"></i> Name</label>
+		<input type="text" id="node-input-name" style="width: 250px;">
+        </input>
+    </div>
+</script>
+
+<script type="text/x-red" data-help-name="R-SH Variable">
+	<p>Accepts true or false to turn on and off</p>
+    <p>Outputs true or false depending on current state of generic device (for exampel variable)</p>
+</script>
+
+
+<script type="text/javascript">
+
+	function generatePreparator(deviceType){
+		return function(){
+			var value=$('#node-input-deviceid').val();
+			$("#node-input-deviceid").replaceWith('<select id="node-input-deviceid" name="node-input-deviceid" style="width: 250px;">');
+			$('#node-input-deviceid').find('option').remove();
+			refresh(function(){
+				$('#node-input-deviceid').val(value);
+			});
+			console.log("refresh");
+			function refresh(listener){
+				$.ajax({
+				  url: "rwesmarthome/list/"+deviceType,
+				  success: function(data) {
+					var data=JSON.parse(data);
+					if (data.noconfig){
+						$("#node-dialog-cancel").click();
+						$("<div>Please configure your smarthome system first:<a href='rwesmarthome/config' target='_config'>config</a></div>").dialog();
+						return;
+					}
+					if (data.notloggedin){
+						$("#node-dialog-cancel").click();
+						$("<div>You are not yet logged in. Please try again in a few seconds. Otherwise check if your password is correct:<a href='rwesmarthome/config' target='_config'>config</a></div>").dialog();
+						return;
+					}
+					for (var deviceid in data) {
+						if (data.hasOwnProperty(deviceid)){
+							$('#node-input-deviceid').find('option').end().append('<option value="'+data[deviceid].id+'">'+data[deviceid].name+' ('+data[deviceid].location+')</option>');
+						}
+					}
+					if (typeof(listener)!=="undefined"){
+						listener();
+					}
+				 }
+				});
+			};
+			
+			
+		}
+	};
+    RED.nodes.registerType('R-SH Door', {
+        category: 'advanced',
+        color: "rgb(218, 196, 180)",
+        defaults: {
+			devicetype: {value: ""},
+            deviceid: {value: ""},
+			name: {value: ""}
+        },
+        inputs: 0,
+        outputs: 1,
+        icon: "feed.png",
+        label: function() {
+			return this.name||"SmartHome Door";
+        },
+        labelStyle: function() {
+            return this.name ? "node_label_italic" : "";
+        },
+        oneditprepare: generatePreparator("WindowDoorSensor")
+    });
+	
+	RED.nodes.registerType('R-SH Switch', {
+        category: 'advanced',
+        color: "rgb(218, 196, 180)",
+        defaults: {
+			devicetype: {value: ""},
+            deviceid: {value: ""},
+			name: {value: ""}
+        },
+        inputs: 1,
+        outputs: 1,
+        icon: "feed.png",
+        label: function() {
+			return this.name||"SmartHome Switch";
+        },
+        labelStyle: function() {
+            return this.name ? "node_label_italic" : "";
+        },
+        oneditprepare: generatePreparator("SwitchActuator")
+    });
+	
+	RED.nodes.registerType('R-SH Door', {
+        category: 'advanced',
+        color: "rgb(218, 196, 180)",
+        defaults: {
+			devicetype: {value: ""},
+            deviceid: {value: ""},
+			name: {value: ""}
+        },
+        inputs: 0,
+        outputs: 1,
+        icon: "feed.png",
+        label: function() {
+			return this.name||"SmartHome Door";
+        },
+        labelStyle: function() {
+            return this.name ? "node_label_italic" : "";
+        },
+        oneditprepare: generatePreparator("WindowDoorSensor")
+    });
+	
+	RED.nodes.registerType('R-SH Variable', {
+        category: 'advanced',
+        color: "rgb(218, 196, 180)",
+        defaults: {
+			devicetype: {value: ""},
+            deviceid: {value: ""},
+			name: {value: ""}
+        },
+        inputs: 1,
+        outputs: 1,
+        icon: "feed.png",
+        label: function() {
+			return this.name||"SmartHome Variable";
+        },
+        labelStyle: function() {
+            return this.name ? "node_label_italic" : "";
+        },
+        oneditprepare: generatePreparator("Variable")
+    });
+	
+
+</script>
