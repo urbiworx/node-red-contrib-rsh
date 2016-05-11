@@ -75,6 +75,9 @@ module.exports = function(RED) {
 		} else {
 			var tempXml=XMLTool.renderXML(xml);
 		}
+
+		https.globalAgent.options.secureProtocol = 'TLSv1_method';
+
 		var req=https.request({
 			hostname:smarthomeip,
 			rejectUnauthorized: false,
